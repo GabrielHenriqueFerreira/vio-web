@@ -1,3 +1,4 @@
+
 name: Implantar VIO na Azure
 
 on:
@@ -14,7 +15,7 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - name: Implantar a versão da tag e validar a API
@@ -30,7 +31,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Confere os valores antes de montar o comando remoto.
           : "${VM_SSH_KEY:?Cadastre VM_SSH_KEY}"
           : "${VM_KNOWN_HOSTS:?Cadastre VM_KNOWN_HOSTS}"
           [[ "$VM_HOST" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
@@ -39,7 +39,6 @@ jobs:
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
           [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
 
-          # Guarda as chaves em arquivos temporários do runner.
           umask 077
           ssh_dir=$(mktemp -d)
           trap 'rm -rf -- "$ssh_dir"' EXIT
@@ -53,9 +52,11 @@ jobs:
             "$VM_USER@$VM_HOST" \
             "bash -s -- '$VM_APP_DIR' '$RELEASE_TAG' '$EXPECTED_SHA'" <<'DEPLOY'
           set -euo pipefail
+
           app_dir=$1
           tag=$2
           expected_sha=$3
+
           cd "$app_dir"
 
           if [[ -n "$(git status --porcelain)" ]]; then
@@ -63,28 +64,65 @@ jobs:
             exit 1
           fi
 
-          # Busca a tag e confirma o commit associado a ela.
           export GIT_TERMINAL_PROMPT=0
           git fetch --no-tags origin "refs/tags/$tag"
+
           tag_object=$(git rev-parse FETCH_HEAD)
           commit=$(git rev-parse 'FETCH_HEAD^{commit}')
+
           if [[ "$expected_sha" != "$tag_object" && "$expected_sha" != "$commit" ]]; then
             echo 'A tag no repositório não corresponde à versão do evento.' >&2
             exit 1
           fi
+
           git switch --detach "$commit"
+
           printf 'Implantando %s no commit %s\n' "$tag" "$commit"
 
-          # Constrói as imagens e inicia o backend antes do Nginx.
           docker compose config --quiet
-          docker compose build
-          docker compose up -d --no-build --wait --wait-timeout 60 backend
-          docker compose up -d --no-build --force-recreate --wait --wait-timeout 60 frontend
+
+          # Construir backend com até 3 tentativas.
+          for tentativa in 1 2 3; do
+            if docker build --progress=plain -t vio-backend:aula05 ./backend; then
+              break
+            fi
+
+            if [[ "$tentativa" -eq 3 ]]; then
+              echo 'Falha ao construir o backend após 3 tentativas.' >&2
+              exit 1
+            fi
+
+            echo "Falha temporária no backend. Tentativa $tentativa."
+            sleep 10
+          done
+
+          # Construir frontend com até 3 tentativas.
+          for tentativa in 1 2 3; do
+            if docker build --progress=plain -t vio-frontend:aula05 ./frontend; then
+              break
+            fi
+
+            if [[ "$tentativa" -eq 3 ]]; then
+              echo 'Falha ao construir o frontend após 3 tentativas.' >&2
+              exit 1
+            fi
+
+            echo "Falha temporária no frontend. Tentativa $tentativa."
+            sleep 10
+          done
+
+          # Iniciar backend e frontend.
+          docker compose up -d --no-build --wait --wait-timeout 120 backend
+
+          docker compose up -d --no-build --force-recreate --wait --wait-timeout 120 frontend
+
           docker compose ps
 
-          # Confirma que a API responde pela porta HTTP do Nginx.
+          # Verificar resposta da API.
           resposta=$(curl -fsS --max-time 5 --retry 5 --retry-delay 2 \
             --retry-all-errors http://127.0.0.1/api/status)
+
           printf '%s\n' "$resposta"
+
           grep -Eq '"status"[[:space:]]*:[[:space:]]*"online"' <<< "$resposta"
           DEPLOY

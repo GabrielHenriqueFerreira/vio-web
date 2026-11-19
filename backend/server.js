@@ -35,13 +35,15 @@ app.get("/", (req, res) => {
   res.send("API VIO funcionando!");
 });
 
+
 app.get("/api/status", (req, res) => {
   res.json({
     projeto: "VIO Web",
     status: "online",
-    mensagem: "API executando corretamente.",
+    mensagem: "API VIO online — versão v1.0.3 publicada na Azure.",
   });
 });
+
 
 app.get("/api/eventos", (req, res) => {
   res.json(eventos);

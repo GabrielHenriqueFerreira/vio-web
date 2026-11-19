@@ -56,11 +56,12 @@ function App() {
 
   return (
     <div className="pagina">
-      <header className="cabecalho">
-        <h1>VIO WEB</h1>
-        <p>Venda de Ingressos Online</p>
-      </header>
-
+   <header className="cabecalho">
+  <h1>VIO WEB</h1>
+  <p>Venda de Ingressos Online</p>
+  <p>Desenvolvido por: Gabriel Henrique Ferreira</p>
+  <p>Turma: DSM</p>
+  </header>
       <main className="conteudo">
         <section className="card">
           <h2>Status da API com TAG - {statusApi?.projeto}</h2>
